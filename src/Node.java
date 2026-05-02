@@ -2,9 +2,16 @@
 // Coursework 2024/2025
 //
 // Submission by
-//  YOUR_NAME_GOES_HERE
-//  YOUR_STUDENT_ID_NUMBER_GOES_HERE
-//  YOUR_EMAIL_GOES_HERE
+//  Seyer Raji
+//  240023389
+//  seyer.raji@city.ac.uk
+
+import java.net.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Random;
+import java.util.Stack;
 
 
 // DO NOT EDIT starts
@@ -82,43 +89,396 @@ interface NodeInterface {
 // Complete this!
 public class Node implements NodeInterface {
 
+    String nodeName;
+    DatagramSocket socket;
+    HashMap<String, String> keyValueStore = new HashMap<>();
+    HashMap<String, String> addressPairs = new HashMap<>();
+    Stack<String> relayStack = new Stack<>();
+
     public void setNodeName(String nodeName) throws Exception {
-	throw new Exception("Not implemented");
+        this.nodeName = nodeName;
     }
 
     public void openPort(int portNumber) throws Exception {
-	throw new Exception("Not implemented");
+        socket = new DatagramSocket(portNumber);
+        String myAddress = InetAddress.getLocalHost().getHostAddress() + ":" + portNumber;
+        addressPairs.put(nodeName, myAddress);
     }
 
     public void handleIncomingMessages(int delay) throws Exception {
-	throw new Exception("Not implemented");
+        socket.setSoTimeout(delay);
+
+        while (true) {
+            try {
+                byte[] buffer = new byte[65536];
+                DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
+                socket.receive(packet);
+                String message = new String(packet.getData(), 0, packet.getLength());
+
+                String transactionID = message.substring(0,2);
+                char messageType = message.charAt(3);
+
+                switch (messageType) {
+                    case 'G': {
+                        String responseMessage = transactionID + " H " + encode(nodeName);
+                        byte[] response = responseMessage.getBytes();
+                        DatagramPacket reply = new DatagramPacket(response, response.length, packet.getAddress(), packet.getPort());
+                        socket.send(reply);
+                        break;
+                    }
+                    case 'N': {
+                        String hashID = message.substring(4);
+                        List<String> closest = findClosestThree(hashID);
+
+                        String responseMessage = transactionID + " O ";
+                        for (String node : closest) {
+                            responseMessage += encode(node) + encode(addressPairs.get(node));
+                        }
+                        byte[] response = responseMessage.getBytes();
+                        DatagramPacket reply = new DatagramPacket(response, response.length, packet.getAddress(), packet.getPort());
+                        socket.send(reply);
+                        break;
+                    }
+                    case 'E': {
+                        String firstString = message.substring(5);
+                        String key = decodeFirstMessage(firstString);
+                        String responseCode;
+                        if (keyValueStore.containsKey(key)) {
+                            responseCode = "Y";
+                        } else {
+                            responseCode = "N";
+                        }
+                        String responseMessage = transactionID + " F " + responseCode + " ";
+                        byte[] response = responseMessage.getBytes();
+                        DatagramPacket reply = new DatagramPacket(response, response.length, packet.getAddress(), packet.getPort());
+                        socket.send(reply);
+                        break;
+                    }
+                    case 'R': {
+                        String firstString = message.substring(5);
+                        String key = decodeFirstMessage(firstString);
+                        if (keyValueStore.containsKey(key)) {
+                            String value = keyValueStore.get(key);
+                            String responseMessage = transactionID + " S Y " + encode(value);
+                            byte[] response = responseMessage.getBytes();
+                            DatagramPacket reply = new DatagramPacket(response, response.length, packet.getAddress(), packet.getPort());
+                            socket.send(reply);
+                        } else {
+                            String responseMessage = transactionID + " S N ";
+                            byte[] response = responseMessage.getBytes();
+                            DatagramPacket reply = new DatagramPacket(response, response.length, packet.getAddress(), packet.getPort());
+                            socket.send(reply);
+                        }
+                        break;
+                    }
+                    case 'W': {
+                        String firstString = message.substring(5);
+                        String key = decodeFirstMessage(firstString);
+                        String value = decodeFirstMessage(decodeRemainingMessage(firstString));
+                        String responseCode;
+                        if (key.startsWith("N:")) {
+                            if (addressPairs.containsKey(key)) {
+                                responseCode = "R";
+                            } else {
+                                responseCode = "A";
+                            }
+                            addressPairs.put(key, value);
+                        } else {
+                            if (keyValueStore.containsKey(key)) {
+                                responseCode = "R";
+                            } else {
+                                responseCode = "A";
+                            }
+                            keyValueStore.put(key, value);
+                        }
+                        String responseMessage = transactionID + " X " + responseCode + " ";
+                        byte[] response = responseMessage.getBytes();
+                        DatagramPacket reply = new DatagramPacket(response, response.length, packet.getAddress(), packet.getPort());
+                        socket.send(reply);
+                        break;
+                    }
+                    case 'V': {
+                        String rest = message.substring(5);
+                        String relayTarget = decodeFirstMessage(rest);
+                        String innerMessage = decodeRemainingMessage(rest);
+
+                        String ipPort = addressPairs.get(relayTarget);
+                        if (ipPort != null) {
+                            int colonIndex = ipPort.indexOf(":");
+                            String ip = ipPort.substring(0, colonIndex);
+                            int port = Integer.parseInt(ipPort.substring(colonIndex + 1));
+                            InetAddress address = InetAddress.getByName(ip);
+
+                            String relayResponse = sendAndReceive(innerMessage, address, port);
+                            if (relayResponse != null) {
+                                String responseMessage = transactionID + " " + relayResponse.substring(3);
+                                byte[] responseBytes = responseMessage.getBytes();
+                                DatagramPacket reply = new DatagramPacket(responseBytes, responseBytes.length, packet.getAddress(), packet.getPort());
+                                socket.send(reply);
+                            }
+                        }
+                        break;
+                    }
+                    case 'C': {
+                        String rest = message.substring(5);
+                        String key = decodeFirstMessage(rest);
+                        String currentValue = decodeFirstMessage(decodeRemainingMessage(rest));
+                        String newValue = decodeFirstMessage(decodeRemainingMessage(decodeRemainingMessage(rest)));
+
+                        String responseCode;
+                        if (keyValueStore.containsKey(key)) {
+                            if (keyValueStore.get(key).equals(currentValue)) {
+                                keyValueStore.put(key, newValue);
+                                responseCode = "R";
+                            } else {
+                                responseCode = "N";
+                            }
+                        } else {
+                            responseCode = "A";
+                        }
+                        String responseMessage = transactionID + " D " + responseCode + " ";
+                        byte[] response = responseMessage.getBytes();
+                        DatagramPacket reply = new DatagramPacket(response, response.length, packet.getAddress(), packet.getPort());
+                        socket.send(reply);
+                        break;
+                    }
+                    default:
+                        break;
+                }
+
+            } catch (SocketTimeoutException error) {
+                return;
+            } catch (Exception error) {
+            }
+        }
     }
-    
+
     public boolean isActive(String nodeName) throws Exception {
-	throw new Exception("Not implemented");
+        String ipPort = addressPairs.get(nodeName);
+        if (ipPort == null) {
+            return false;
+        }
+        int colonIndex = ipPort.indexOf(":");
+        String ip = ipPort.substring(0, colonIndex);
+        int port = Integer.parseInt(ipPort.substring(colonIndex + 1));
+
+        InetAddress address = InetAddress.getByName(ip);
+        String reply = sendAndReceive(createTransactionID() + " G ", address, port);
+        if (reply != null && reply.charAt(3) == 'H') {
+            return true;
+        }
+        return false;
     }
-    
+
     public void pushRelay(String nodeName) throws Exception {
-	throw new Exception("Not implemented");
+        relayStack.push(nodeName);
     }
 
     public void popRelay() throws Exception {
-        throw new Exception("Not implemented");
+        if (!relayStack.isEmpty()) relayStack.pop();
     }
 
     public boolean exists(String key) throws Exception {
-	throw new Exception("Not implemented");
+        handleIncomingMessages(100);
+        List<String> closest = findClosestThree(key);
+        for (String node : closest) {
+            String ipPort = addressPairs.get(node);
+            int colonIndex = ipPort.indexOf(":");
+            String ip = ipPort.substring(0, colonIndex);
+            int port = Integer.parseInt(ipPort.substring(colonIndex + 1));
+            InetAddress address = InetAddress.getByName(ip);
+
+            String request = createTransactionID() + " E " + encode(key);
+            String response = sendAndReceive(request, address, port);
+            if (response != null && response.contains(" Y ")) {
+                return true;
+            }
+        }
+        return false;
     }
-    
+
     public String read(String key) throws Exception {
-	throw new Exception("Not implemented");
+        handleIncomingMessages(100);
+        List<String> closest = findClosestThree(key);
+        for (String node : closest) {
+            String ipPort = addressPairs.get(node);
+            int colonIndex = ipPort.indexOf(":");
+            String ip = ipPort.substring(0, colonIndex);
+            int port = Integer.parseInt(ipPort.substring(colonIndex + 1));
+            InetAddress address = InetAddress.getByName(ip);
+
+            String request = createTransactionID() + " R " + encode(key);
+            String response = sendAndReceive(request, address, port);
+            if (response != null && response.charAt(5) == 'Y') {
+                return decodeFirstMessage(response.substring(7));
+            }
+        }
+        return null;
     }
 
     public boolean write(String key, String value) throws Exception {
-	throw new Exception("Not implemented");
+        handleIncomingMessages(100);
+        List<String> closest = findClosestThree(key);
+        boolean success = false;
+        for (String node : closest) {
+            String ipPort = addressPairs.get(node);
+            int colonIndex = ipPort.indexOf(":");
+            String ip = ipPort.substring(0, colonIndex);
+            int port = Integer.parseInt(ipPort.substring(colonIndex + 1));
+            InetAddress address = InetAddress.getByName(ip);
+
+            String request = createTransactionID() + " W " + encode(key) + encode(value);
+            String response = sendAndReceive(request, address, port);
+            if (response != null && (response.contains(" R ") || response.contains(" A "))) {
+                success = true;
+            }
+        }
+        return success;
     }
 
     public boolean CAS(String key, String currentValue, String newValue) throws Exception {
-	throw new Exception("Not implemented");
+        handleIncomingMessages(100);
+        List<String> closest = findClosestThree(key);
+        for (String node : closest) {
+            String ipPort = addressPairs.get(node);
+            int colonIndex = ipPort.indexOf(":");
+            String ip = ipPort.substring(0, colonIndex);
+            int port = Integer.parseInt(ipPort.substring(colonIndex + 1));
+            InetAddress address = InetAddress.getByName(ip);
+
+            String request = createTransactionID() + " C " + encode(key) + encode(currentValue) + encode(newValue);
+            String response = sendAndReceive(request, address, port);
+            if (response != null && response.contains(" R ")) {
+                return true;
+            }
+        }
+        return false;
     }
+
+    int compareMatchingBits(String key1, String key2) throws Exception {
+        byte[] hashA = HashID.computeHashID(key1);
+        byte[] hashB = HashID.computeHashID(key2);
+        int count = 0;
+
+        for (int i = 0; i < 32; i++) {
+            if (hashA[i] == hashB[i]) count += 8;
+            else {
+                for (int j = 0; j < 8; j++) {
+                    int bitIndex = 7 - j;
+                    int bitA = (hashA[i] >> bitIndex) & 1;
+                    int bitB = (hashB[i] >> bitIndex) & 1;
+
+                    if (bitA == bitB) {
+                        count++;
+                    } else {
+                        return count;
+                    }
+                }
+            }
+        }
+
+        return count;
+    }
+
+    String encode(String s) {
+        int spaceCount = 0;
+        for (char c : s.toCharArray()) {
+            if (c == ' ') {
+                spaceCount++;
+            }
+        }
+        return (spaceCount + " " + s + " ");
+    }
+
+    String decode(String s) {
+        int firstSpaceIndex = s.indexOf(' ');
+        String message = s.substring(firstSpaceIndex + 1, s.length() -1);
+
+        return message;
+    }
+
+    String decodeFirstMessage(String s) {
+        int spaceCount = Character.getNumericValue(s.charAt(0));
+        int spacesFound = 0;
+        int end = 2;
+        for (int i = 2; i < s.length(); i++) {
+            if (s.charAt(i) == ' ') {
+                spacesFound++;
+                if (spacesFound == spaceCount + 1) {
+                    end = i;
+                    break;
+                }
+            }
+        }
+        return decode(s.substring(0, end + 1));
+    }
+
+    String decodeRemainingMessage(String s) {
+        int spaceCount = Character.getNumericValue(s.charAt(0));
+        int spacesFound = 0;
+        for (int i = 2; i < s.length(); i++) {
+            if (s.charAt(i) == ' ') {
+                spacesFound++;
+                if (spacesFound == spaceCount + 1) {
+                    return s.substring(i + 1);
+                }
+            }
+        }
+        return "";
+    }
+
+    String sendAndReceive(String message, InetAddress address, int port) throws Exception {
+        DatagramSocket tempSocket = new DatagramSocket();
+        tempSocket.setSoTimeout(5000);
+        byte[] requestBytes = message.getBytes();
+        DatagramPacket sendPacket = new DatagramPacket(requestBytes, requestBytes.length, address, port);
+
+        for (int attempt = 0; attempt < 3; attempt++) {
+            tempSocket.send(sendPacket);
+            try {
+                byte[] buffer = new byte[65536];
+                DatagramPacket receivePacket = new DatagramPacket(buffer, buffer.length);
+                tempSocket.receive(receivePacket);
+                tempSocket.close();
+                return new String(receivePacket.getData(), 0, receivePacket.getLength());
+            } catch (SocketTimeoutException e) {
+            }
+        }
+        tempSocket.close();
+        return null;
+    }
+
+    String createTransactionID() {
+        Random random = new Random();
+        byte[] id = new byte[2];
+        for (int i = 0; i < 2; i++) {
+            int b = random.nextInt(255) + 1;
+            if (b == 0x20) {
+                b = 0x21;
+            }
+            id[i] = (byte) b;
+        }
+        return new String(id);
+    }
+
+    List<String> findClosestThree(String key) throws Exception {
+        List<String> nodes = new ArrayList<>(addressPairs.keySet());
+        List<String> closest = new ArrayList<>();
+
+        for (int i = 0; i < 3 && !nodes.isEmpty(); i++) {
+            String closestNode = null;
+            int mostMatchingBits = -1;
+            for (String node : nodes) {
+                int bits = compareMatchingBits(node, key);
+                if (bits > mostMatchingBits) {
+                    mostMatchingBits = bits;
+                    closestNode = node;
+                }
+            }
+            closest.add(closestNode);
+            nodes.remove(closestNode);
+        }
+        return closest;
+    }
+
 }
