@@ -9,6 +9,7 @@
 import java.net.*;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
 import java.util.Stack;
@@ -94,6 +95,7 @@ public class Node implements NodeInterface {
     HashMap<String, String> keyValueStore = new HashMap<>();
     HashMap<String, String> addressPairs = new HashMap<>();
     Stack<String> relayStack = new Stack<>();
+    HashSet<String> seenTransactionIDs = new HashSet<>();
 
     public void setNodeName(String nodeName) throws Exception {
         this.nodeName = nodeName;
@@ -117,6 +119,11 @@ public class Node implements NodeInterface {
 
                 String transactionID = message.substring(0,2);
                 char messageType = message.charAt(3);
+
+                if (seenTransactionIDs.contains(transactionID)) {
+                    continue;
+                }
+                seenTransactionIDs.add(transactionID);
 
                 switch (messageType) {
                     case 'G': {
@@ -179,10 +186,13 @@ public class Node implements NodeInterface {
                         if (key.startsWith("N:")) {
                             if (addressPairs.containsKey(key)) {
                                 responseCode = "R";
+                                addressPairs.put(key, value);
+                            } else if (canStoreAddress(key)) {
+                                responseCode = "A";
+                                addressPairs.put(key, value);
                             } else {
                                 responseCode = "A";
                             }
-                            addressPairs.put(key, value);
                         } else {
                             if (keyValueStore.containsKey(key)) {
                                 responseCode = "R";
@@ -428,19 +438,39 @@ public class Node implements NodeInterface {
     }
 
     String sendAndReceive(String message, InetAddress address, int port) throws Exception {
+        if (!relayStack.isEmpty()) {
+            String relayNode = relayStack.peek();
+            String relayIpPort = addressPairs.get(relayNode);
+            if (relayIpPort != null) {
+                int colonIndex = relayIpPort.indexOf(":");
+                String relayIp = relayIpPort.substring(0, colonIndex);
+                int relayPort = Integer.parseInt(relayIpPort.substring(colonIndex + 1));
+                address = InetAddress.getByName(relayIp);
+                port = relayPort;
+                message = message.substring(0, 2) + " V " + encode(relayNode) + message.substring(3);
+            }
+        }
+
         DatagramSocket tempSocket = new DatagramSocket();
         tempSocket.setSoTimeout(5000);
         byte[] requestBytes = message.getBytes();
         DatagramPacket sendPacket = new DatagramPacket(requestBytes, requestBytes.length, address, port);
 
+        String transactionID = message.substring(0, 2);
+
         for (int attempt = 0; attempt < 3; attempt++) {
             tempSocket.send(sendPacket);
             try {
-                byte[] buffer = new byte[65536];
-                DatagramPacket receivePacket = new DatagramPacket(buffer, buffer.length);
-                tempSocket.receive(receivePacket);
-                tempSocket.close();
-                return new String(receivePacket.getData(), 0, receivePacket.getLength());
+                while (true) {
+                    byte[] buffer = new byte[65536];
+                    DatagramPacket receivePacket = new DatagramPacket(buffer, buffer.length);
+                    tempSocket.receive(receivePacket);
+                    String response = new String(receivePacket.getData(), 0, receivePacket.getLength());
+                    if (response.length() >= 2 && response.substring(0, 2).equals(transactionID)) {
+                        tempSocket.close();
+                        return response;
+                    }
+                }
             } catch (SocketTimeoutException e) {
             }
         }
@@ -450,15 +480,21 @@ public class Node implements NodeInterface {
 
     String createTransactionID() {
         Random random = new Random();
-        byte[] id = new byte[2];
-        for (int i = 0; i < 2; i++) {
-            int b = random.nextInt(255) + 1;
-            if (b == 0x20) {
-                b = 0x21;
+        String chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        char first = chars.charAt(random.nextInt(chars.length()));
+        char second = chars.charAt(random.nextInt(chars.length()));
+        return "" + first + second;
+    }
+
+    boolean canStoreAddress(String newNode) throws Exception {
+        int distance = compareMatchingBits(nodeName, newNode);
+        int count = 0;
+        for (String existing : addressPairs.keySet()) {
+            if (compareMatchingBits(nodeName, existing) == distance) {
+                count++;
             }
-            id[i] = (byte) b;
         }
-        return new String(id);
+        return count < 3;
     }
 
     List<String> findClosestThree(String key) throws Exception {
