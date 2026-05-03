@@ -16,9 +16,12 @@ Working Functionality
 - Compare-and-swap (C/D) - atomic value update
 - Relay (V) - forwarding messages to other nodes
 - Retrying requests up to 3 times if no response after 5 seconds
+- Duplicate packets are detected and ignored
+- Packet reordering handled via transaction ID matching
+- 3 per distance rule enforced for address storage
+- Relay stack used when sending messages
 - Malformed messages don't crash the node
 
 Known Limitations:
-- Relay stack not used when sending messages
-- 3 per distance rule for address storage not enforced
+- Active node discovery via Nearest requests not implemented
 
