@@ -297,6 +297,7 @@ public class Node implements NodeInterface {
         List<String> closest = findClosestThree(key);
         for (String node : closest) {
             String ipPort = addressPairs.get(node);
+            if (ipPort == null) continue;
             int colonIndex = ipPort.indexOf(":");
             String ip = ipPort.substring(0, colonIndex);
             int port = Integer.parseInt(ipPort.substring(colonIndex + 1));
@@ -316,6 +317,7 @@ public class Node implements NodeInterface {
         List<String> closest = findClosestThree(key);
         for (String node : closest) {
             String ipPort = addressPairs.get(node);
+            if (ipPort == null) continue;
             int colonIndex = ipPort.indexOf(":");
             String ip = ipPort.substring(0, colonIndex);
             int port = Integer.parseInt(ipPort.substring(colonIndex + 1));
@@ -336,6 +338,7 @@ public class Node implements NodeInterface {
         boolean success = false;
         for (String node : closest) {
             String ipPort = addressPairs.get(node);
+            if (ipPort == null) continue;
             int colonIndex = ipPort.indexOf(":");
             String ip = ipPort.substring(0, colonIndex);
             int port = Integer.parseInt(ipPort.substring(colonIndex + 1));
@@ -355,6 +358,7 @@ public class Node implements NodeInterface {
         List<String> closest = findClosestThree(key);
         for (String node : closest) {
             String ipPort = addressPairs.get(node);
+            if (ipPort == null) continue;
             int colonIndex = ipPort.indexOf(":");
             String ip = ipPort.substring(0, colonIndex);
             int port = Integer.parseInt(ipPort.substring(colonIndex + 1));
