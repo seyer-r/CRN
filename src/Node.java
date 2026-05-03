@@ -109,8 +109,12 @@ public class Node implements NodeInterface {
 
     public void handleIncomingMessages(int delay) throws Exception {
         socket.setSoTimeout(delay);
+        long startTime = System.currentTimeMillis();
 
         while (true) {
+            if (delay != 0 && System.currentTimeMillis() - startTime >= delay) {
+                return;
+            }
             try {
                 byte[] buffer = new byte[65536];
                 DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
